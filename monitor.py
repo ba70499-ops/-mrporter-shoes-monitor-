@@ -1,4 +1,4 @@
-# MR PORTER メンズシューズ値下げ監視 - 値下げ時のみ通知（2時間ごと）
+# MR PORTER メンズシューズ値下げ監視 - エラー時通知なし版
 
 import os
 import requests
@@ -22,7 +22,7 @@ def send_line(text):
     data = {"messages": [{"type": "text", "text": text}]}
     try:
         r = requests.post(LINE_API_URL, headers=headers, json=data, timeout=10)
-        print(f"✅ LINE送信: {r.status_code}")
+        print(f"✅ LINE: {r.status_code}")
         return True
     except:
         return False
@@ -40,7 +40,7 @@ def save_db(db):
     with open(PRICE_DB_FILE, 'w') as f:
         json.dump(db, f)
 
-def fetch_mrporter_shoes():
+def scrape_mrporter():
     try:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -50,71 +50,41 @@ def fetch_mrporter_shoes():
         soup = BeautifulSoup(r.content, 'html.parser')
         products = {}
         
-        # MR PORTER商品セレクタ
         items = soup.find_all('div', class_=['product-tile', 'product', 'item'])
         for item in items[:30]:
-            try:
-                name_elem = item.find(['h3', 'h2', 'a', '.product-name'])
-                if not name_elem:
-                    continue
-                name = name_elem.get_text(strip=True)[:50]
-                
-                # 価格抽出（$）
-                price_text = ''
-                price_elems = item.find_all(string=re.compile(r'\$\d+'))
-                if price_elems:
-                    price_text = price_elems[0]
-                
-                price_match = re.search(r'[\$]?([\d,]+\.?\d*)', price_text)
-                if price_match:
-                    price = int(float(price_match.group(1).replace(',', '')) * 100)  # セント単位
-                    products[name] = price
-            except:
-                continue
+            name = item.find(['h3', 'h2', 'a']).get_text(strip=True)[:50] if item.find(['h3', 'h2', 'a']) else ''
+            price_match = re.search(r'\$([\d,]+\.?\d*)', item.get_text())
+            if price_match and name:
+                price = int(float(price_match.group(1).replace(',', '')) * 100)
+                products[name] = price
         
-        print(f"👞 MR PORTER商品数: {len(products)}")
+        print(f"👞 MR PORTER: {len(products)}件")
         return products
-    except Exception as e:
-        print(f"❌ MR PORTERエラー: {e}")
-        return {}
+    except:
+        print("❌ MR PORTER スクレイピングエラー（通知なし）")
+        return None
 
 def main():
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S JST')
     db = load_db()
     
-    current_products = fetch_mrporter_shoes()
-    if not current_products:
+    products = scrape_mrporter()
+    if products is None:
+        print("📊 エラー → 通知なし（正常）")
         return
     
-    # 値下げ検知（値下げ時のみ通知）
-    price_drops = []
-    for name, price in current_products.items():
+    drops = []
+    for name, price in products.items():
         if name in db and db[name] > price:
-            drop_amount = (db[name] - price) / 100  # ドルに戻す
-            price_drops.append({
-                'name': name[:35],
-                'old': f"${db[name]/100:.0f}",
-                'new': f"${price/100:.0f}",
-                'drop': f"${drop_amount:.0f}"
-            })
+            drop_amount = (db[name] - price) / 100
+            drops.append(f"👞 {name[:35]} ${db[name]/100:.0f}→${price/100:.0f}")
     
-    # 値下げがあった時のみ通知
-    if price_drops:
-        message = f"🔥 【MR PORTER値下げ】{len(price_drops)}件\n⏰ {timestamp}\n\n"
-        for drop in sorted(price_drops, key=lambda x: float(x['drop'][1:]), reverse=True)[:5]:
-            message += f"👞 {drop['name']}\n"
-            message += f"   {drop['old']} → {drop['new']}\n"
-            message += f"   ↓ {drop['drop']}\n\n"
-        message += f"🔗 {MRPORTER_URL}"
-        send_line(message)
-        print(f"✅ MR PORTER値下げ通知: {len(price_drops)}件")
-    else:
-        print("📊 MR PORTER値下げなし")
+    if drops:
+        msg = f"👞 【MR PORTER値下げ】{len(drops)}件\n⏰ {timestamp}\n\n" + "\n".join(drops[:5])
+        send_line(msg)
     
-    # DB更新
-    db.update(current_products)
+    db.update(products)
     save_db(db)
-    print("✅ MR PORTER監視完了")
 
 if __name__ == "__main__":
     main()
