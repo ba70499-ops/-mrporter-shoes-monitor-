@@ -1,0 +1,7 @@
+services:
+  - type: cron
+    name: mrporter-monitor
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python monitor.py
+    cron: "0 */2 * * *"  # 2時間ごと
