@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # MR PORTER メンズシューズ値下げ監視 - 値下げ時のみ通知（2時間ごと）
 
 import os
